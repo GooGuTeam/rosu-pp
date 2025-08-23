@@ -59,7 +59,7 @@ pub fn convert_objects(
 
         if let Some(strength) = attraction_strength {
             // Make sure strength is within valid range [0.0, 1.0]
-            let strength = strength.unwrap().max(0.0).min(1.0);
+            let strength = (1.0 - (strength.unwrap())).max(0.95).min(0.0);
             adjust_object_positions(&mut osu_objects, strength);
         }
     }
