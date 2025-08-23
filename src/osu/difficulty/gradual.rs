@@ -89,6 +89,7 @@ impl OsuGradualDifficulty {
             time_preempt,
             map.hit_objects.len(),
             &mut attrs,
+            mods,
         );
 
         attrs.n_circles = 0;
@@ -160,6 +161,7 @@ impl Iterator for OsuGradualDifficulty {
 
             self.skills.aim.process(curr, &self.diff_objects);
             self.skills.aim_no_sliders.process(curr, &self.diff_objects);
+            self.skills.relax.process(curr, &self.diff_objects);
             self.skills.speed.process(curr, &self.diff_objects);
             self.skills.flashlight.process(curr, &self.diff_objects);
 

@@ -50,7 +50,7 @@ impl<'a> OsuPerformanceCalculator<'a> {
 }
 
 impl OsuPerformanceCalculator<'_> {
-    pub fn calculate(mut self) -> OsuPerformanceAttributes {
+    pub fn calculate(self) -> OsuPerformanceAttributes {
         let total_hits = self.state.total_hits();
 
         if total_hits == 0 {
@@ -72,35 +72,17 @@ impl OsuPerformanceCalculator<'_> {
             multiplier *= 1.0 - (f64::from(self.attrs.n_spinners) / total_hits).powf(0.85);
         }
 
-        if self.mods.rx() {
-            let od = self.attrs.od();
-
-            // * https://www.desmos.com/calculator/bc9eybdthb
-            // * we use OD13.3 as maximum since it's the value at which great hitwidow becomes 0
-            // * this is well beyond currently maximum achievable OD which is 12.17 (DTx2 + DA with OD11)
-            let (n100_mult, n50_mult) = if od > 0.0 {
-                (
-                    (1.0 - (od / 13.33).powf(1.8)).max(0.0),
-                    (1.0 - (od / 13.33).powf(5.0)).max(0.0),
-                )
-            } else {
-                (1.0, 1.0)
-            };
-
-            // * As we're adding Oks and Mehs to an approximated number of combo breaks the result can be
-            // * higher than total hits in specific scenarios (which breaks some calculations) so we need to clamp it.
-            self.effective_miss_count = (self.effective_miss_count
-                + f64::from(self.state.n100) * n100_mult
-                + f64::from(self.state.n50) * n50_mult)
-                .min(total_hits);
-        }
-
         let speed_deviation = self.calculate_speed_deviation();
 
-        let aim_value = self.compute_aim_value();
+        let mut aim_value = self.compute_aim_value();
         let speed_value = self.compute_speed_value(speed_deviation);
-        let acc_value = self.compute_accuracy_value();
+        let mut acc_value = self.compute_accuracy_value();
         let flashlight_value = self.compute_flashlight_value();
+
+        if self.mods.rx() {
+            aim_value *= 1.715;
+            acc_value *= 1.52;
+        }
 
         let pp = (aim_value.powf(1.1)
             + speed_value.powf(1.1)
@@ -170,7 +152,8 @@ impl OsuPerformanceCalculator<'_> {
 
         let total_hits = self.total_hits();
 
-        let len_bonus = 0.95
+        let len_bonus_basis = if self.mods.rx() { 0.88 } else { 0.95 };
+        let len_bonus = len_bonus_basis
             + 0.4 * (total_hits / 2000.0).min(1.0)
             + f64::from(u8::from(total_hits > 2000.0)) * (total_hits / 2000.0).log10() * 0.5;
 
@@ -180,15 +163,18 @@ impl OsuPerformanceCalculator<'_> {
             aim_value *= Self::calculate_miss_penalty(
                 self.effective_miss_count,
                 self.attrs.aim_difficult_strain_count,
+                total_hits,
+                self.mods,
             );
         }
 
-        let ar_factor = if self.mods.rx() {
-            0.0
-        } else if self.attrs.ar > 10.33 {
+        // R* Low AR Override from Akatsuki
+        let lowar_factor_basis = if self.mods.rx() { 0.025 } else { 0.05 };
+
+        let ar_factor = if self.attrs.ar > 10.33 {
             0.3 * (self.attrs.ar - 10.33)
         } else if self.attrs.ar < 8.0 {
-            0.05 * (8.0 - self.attrs.ar)
+            lowar_factor_basis * (8.0 - self.attrs.ar)
         } else {
             0.0
         };
@@ -203,13 +189,48 @@ impl OsuPerformanceCalculator<'_> {
                     * self.acc.powf(16.0))
                     * (1.0 - 0.003 * self.attrs.hp * self.attrs.hp);
         } else if self.mods.hd() || self.mods.tc() {
-            // * We want to give more reward for lower AR when it comes to aim and HD. This nerfs high AR and buffs lower AR.
-            aim_value *= 1.0 + 0.04 * (12.0 - self.attrs.ar);
+            // R* We want to give more reward for lower AR when it comes to aim and HD. This nerfs high AR and buffs lower AR.
+            let hd_factor = if self.mods.rx() {
+                1.0 + 0.05 * (11.0 - self.attrs.ar)
+            } else {
+                1.0 + 0.04 * (12.0 - self.attrs.ar)
+            };
+            aim_value *= hd_factor;
         }
 
-        aim_value *= self.acc;
+        // R* EZ bonus
+        if self.mods.ez() && self.mods.rx() {
+            let mut base_buff = 1.08_f64;
+
+            if self.attrs.ar <= 8.0 {
+                base_buff += (7.0 - self.attrs.ar) / 100.0;
+            }
+
+            aim_value *= base_buff;
+        }
+
+        // R* Precision buff (reading)
+        if self.attrs.cs > 5.58 && self.mods.rx() {
+            aim_value *= ((self.attrs.cs - 5.46).powf(1.8) + 1.0).powf(0.03);
+            // R* Special buff for high CS and high AR
+            if self.attrs.ar > 10.8 {
+                aim_value *= 1.0 + (self.attrs.ar - 10.8);
+                aim_value *= 1.0 + (self.attrs.cs - 6.0).clamp(0.0, 0.2);
+            }
+        }
+
+        // R* Tweak acc bonus for RX
+        aim_value *= if self.mods.rx() {
+            0.3 + self.acc / 2.0
+        } else {
+            self.acc
+        };
         // * It is important to consider accuracy difficulty when scaling with accuracy.
         aim_value *= 0.98 + f64::powf(f64::max(0.0, self.attrs.od()), 2.0) / 2500.0;
+        // R* Bonus bonus normal clock rate scores
+        if self.mods.rx() && self.mods.clock_rate() <= 1.0 {
+            aim_value *= 1.20
+        }
 
         aim_value
     }
@@ -233,6 +254,8 @@ impl OsuPerformanceCalculator<'_> {
             speed_value *= Self::calculate_miss_penalty(
                 self.effective_miss_count,
                 self.attrs.speed_difficult_strain_count,
+                total_hits,
+                self.mods,
             );
         }
 
@@ -287,10 +310,6 @@ impl OsuPerformanceCalculator<'_> {
     }
 
     fn compute_accuracy_value(&self) -> f64 {
-        if self.mods.rx() {
-            return 0.0;
-        }
-
         // * This percentage only considers HitCircles of any value - in this part
         // * of the calculation we focus on hitting the timing hit window.
         let mut amount_hit_objects_with_acc = self.attrs.n_circles;
@@ -507,7 +526,16 @@ impl OsuPerformanceCalculator<'_> {
     // * Miss penalty assumes that a player will miss on the hardest parts of a map,
     // * so we use the amount of relatively difficult sections to adjust miss penalty
     // * to make it more punishing on maps with lower amount of hard sections.
-    fn calculate_miss_penalty(miss_count: f64, diff_strain_count: f64) -> f64 {
+    fn calculate_miss_penalty(
+        miss_count: f64,
+        diff_strain_count: f64,
+        total_hits: f64,
+        mods: &GameMods,
+    ) -> f64 {
+        if mods.rx() {
+            return 0.97
+                * (1.0 - (miss_count / total_hits).powf(0.5)).powf(1.0 + (miss_count / 1.5));
+        }
         0.96 / ((miss_count / (4.0 * diff_strain_count.ln().powf(0.94))) + 1.0)
     }
 
