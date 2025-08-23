@@ -1,14 +1,14 @@
 use std::f64::consts::FRAC_PI_2;
-use std::{ cmp, f64::consts::PI };
+use std::{cmp, f64::consts::PI};
 
 use crate::{
     any::difficulty::{
-        object::{ HasStartTime, IDifficultyObject },
-        skills::{ strain_decay, StrainSkill },
+        object::{HasStartTime, IDifficultyObject},
+        skills::{strain_decay, StrainSkill},
     },
     osu::difficulty::object::OsuDifficultyObject,
     util::{
-        difficulty::{ logistic, milliseconds_to_bpm, reverse_lerp, smootherstep, smoothstep },
+        difficulty::{logistic, milliseconds_to_bpm, reverse_lerp, smootherstep, smoothstep},
         float_ext::FloatExt,
         strains_vec::StrainsVec,
     },
@@ -34,9 +34,11 @@ impl Relax {
         &mut self,
         time: f64,
         curr: &OsuDifficultyObject<'_>,
-        objects: &[OsuDifficultyObject<'_>]
+        objects: &[OsuDifficultyObject<'_>],
     ) -> f64 {
-        let prev_start_time = curr.previous(0, objects).map_or(0.0, HasStartTime::start_time);
+        let prev_start_time = curr
+            .previous(0, objects)
+            .map_or(0.0, HasStartTime::start_time);
 
         self.current_strain * strain_decay(time - prev_start_time, Self::STRAIN_DECAY_BASE)
     }
@@ -44,16 +46,15 @@ impl Relax {
     fn strain_value_at(
         &mut self,
         curr: &OsuDifficultyObject<'_>,
-        objects: &[OsuDifficultyObject<'_>]
+        objects: &[OsuDifficultyObject<'_>],
     ) -> f64 {
         self.current_strain *= strain_decay(curr.delta_time, Self::STRAIN_DECAY_BASE);
-        self.current_strain +=
-            RelaxAimEvaluator::evaluate_diff_of(
-                curr,
-                objects,
-                self.hit_window,
-                self.include_sliders
-            ) * Self::SKILL_MULTIPLIER;
+        self.current_strain += RelaxAimEvaluator::evaluate_diff_of(
+            curr,
+            objects,
+            self.hit_window,
+            self.include_sliders,
+        ) * Self::SKILL_MULTIPLIER;
 
         if curr.base.is_slider() {
             self.slider_strains.push(self.current_strain);
@@ -87,7 +88,7 @@ impl Relax {
             current_strain_peaks,
             Self::REDUCED_SECTION_COUNT,
             Self::REDUCED_STRAIN_BASELINE,
-            Self::DECAY_WEIGHT
+            Self::DECAY_WEIGHT,
         )
     }
 }
@@ -108,14 +109,15 @@ impl RelaxAimEvaluator {
         curr: &'a OsuDifficultyObject<'a>,
         diff_objects: &'a [OsuDifficultyObject<'a>],
         hit_window: f64,
-        with_slider_travel_dist: bool
+        with_slider_travel_dist: bool,
     ) -> f64 {
         let osu_curr_obj = curr;
 
         let Some((osu_last_last_obj, osu_last_obj)) = curr
             .previous(1, diff_objects)
             .zip(curr.previous(0, diff_objects))
-            .filter(|(_, last)| !(curr.base.is_spinner() || last.base.is_spinner())) else {
+            .filter(|(_, last)| !(curr.base.is_spinner() || last.base.is_spinner()))
+        else {
             return 0.0;
         };
 
@@ -165,9 +167,8 @@ impl RelaxAimEvaluator {
         aim_strain *= stream_nerf.clamp(0.92, 0.98);
 
         // * If rhythms are the same.
-        if
-            osu_curr_obj.strain_time.max(osu_last_obj.strain_time) <
-            1.25 * osu_curr_obj.strain_time.min(osu_last_obj.strain_time)
+        if osu_curr_obj.strain_time.max(osu_last_obj.strain_time)
+            < 1.25 * osu_curr_obj.strain_time.min(osu_last_obj.strain_time)
         {
             if let Some((curr_angle, last_angle)) = osu_curr_obj.angle.zip(osu_last_obj.angle) {
                 // * Rewarding angles, take the smaller velocity as base.
@@ -177,46 +178,39 @@ impl RelaxAimEvaluator {
                 acute_angle_bonus = Self::calc_acute_angle_bonus(curr_angle);
 
                 // * Penalize angle repetition.
-                wide_angle_bonus *=
-                    1.0 -
-                    f64::min(
+                wide_angle_bonus *= 1.0
+                    - f64::min(
                         wide_angle_bonus,
-                        f64::powf(Self::calc_wide_angle_bonus(last_angle), 3.0)
+                        f64::powf(Self::calc_wide_angle_bonus(last_angle), 3.0),
                     );
-                acute_angle_bonus *=
-                    0.08 +
-                    0.92 *
-                        (1.0 -
-                            f64::min(
+                acute_angle_bonus *= 0.08
+                    + 0.92
+                        * (1.0
+                            - f64::min(
                                 acute_angle_bonus,
-                                f64::powf(Self::calc_acute_angle_bonus(last_angle), 3.0)
+                                f64::powf(Self::calc_acute_angle_bonus(last_angle), 3.0),
                             ));
 
                 // R* Nerf strain time for above 300 1/2 fast objects smoothly.
                 let nerf_base = 1.07_f64;
-                let nerf_strain_time =
-                    osu_curr_obj.strain_time *
-                    nerf_base.powf(
-                        smootherstep(
-                            milliseconds_to_bpm(osu_curr_obj.strain_time, Some(2)),
-                            300.0,
-                            400.0
-                        )
-                    );
+                let nerf_strain_time = osu_curr_obj.strain_time
+                    * nerf_base.powf(smootherstep(
+                        milliseconds_to_bpm(osu_curr_obj.strain_time, Some(2)),
+                        300.0,
+                        400.0,
+                    ));
 
                 // * Apply full wide angle bonus for distance more than one diameter
-                wide_angle_bonus *=
-                    angle_bonus *
-                    smootherstep(osu_curr_obj.lazy_jump_dist, 0.0, f64::from(DIAMETER));
+                wide_angle_bonus *= angle_bonus
+                    * smootherstep(osu_curr_obj.lazy_jump_dist, 0.0, f64::from(DIAMETER));
 
                 // * Apply acute angle bonus for BPM above 300 1/2 and distance more than one diameter
-                acute_angle_bonus *=
-                    angle_bonus *
-                    smootherstep(milliseconds_to_bpm(nerf_strain_time, Some(2)), 300.0, 400.0) *
-                    smootherstep(
+                acute_angle_bonus *= angle_bonus
+                    * smootherstep(milliseconds_to_bpm(nerf_strain_time, Some(2)), 300.0, 400.0)
+                    * smootherstep(
                         osu_curr_obj.lazy_jump_dist,
                         f64::from(DIAMETER),
-                        f64::from(DIAMETER * 2)
+                        f64::from(DIAMETER * 2),
                     );
 
                 // R* Penalize wide angles if their distances are quite small (consider as wide angle stream).
@@ -227,67 +221,61 @@ impl RelaxAimEvaluator {
 
                 // * Apply wiggle bonus for jumps that are [radius, 3*diameter] in distance, with < 110 angle
                 // * https://www.desmos.com/calculator/dp0v0nvowc
-                wiggle_bonus =
-                    angle_bonus *
-                    smootherstep(
+                wiggle_bonus = angle_bonus
+                    * smootherstep(
                         osu_curr_obj.lazy_jump_dist,
                         f64::from(RADIUS),
-                        f64::from(DIAMETER)
-                    ) *
-                    f64::powf(
+                        f64::from(DIAMETER),
+                    )
+                    * f64::powf(
                         reverse_lerp(
                             osu_curr_obj.lazy_jump_dist,
                             f64::from(DIAMETER * 3),
-                            f64::from(DIAMETER)
+                            f64::from(DIAMETER),
                         ),
-                        1.8
-                    ) *
-                    smootherstep(curr_angle, f64::to_radians(110.0), f64::to_radians(60.0)) *
-                    smootherstep(
+                        1.8,
+                    )
+                    * smootherstep(curr_angle, f64::to_radians(110.0), f64::to_radians(60.0))
+                    * smootherstep(
                         osu_last_obj.lazy_jump_dist,
                         f64::from(RADIUS),
-                        f64::from(DIAMETER)
-                    ) *
-                    f64::powf(
+                        f64::from(DIAMETER),
+                    )
+                    * f64::powf(
                         reverse_lerp(
                             osu_last_obj.lazy_jump_dist,
                             f64::from(DIAMETER * 3),
-                            f64::from(DIAMETER)
+                            f64::from(DIAMETER),
                         ),
-                        1.8
-                    ) *
-                    smootherstep(last_angle, f64::to_radians(110.0), f64::to_radians(60.0));
+                        1.8,
+                    )
+                    * smootherstep(last_angle, f64::to_radians(110.0), f64::to_radians(60.0));
             }
         }
 
         if prev_vel.max(curr_vel).not_eq(0.0) {
             // * We want to use the average velocity over the whole object when awarding
             // * differences, not the individual jump and slider path velocities.
-            prev_vel =
-                (osu_last_obj.lazy_jump_dist + osu_last_last_obj.travel_dist) /
-                osu_last_obj.strain_time;
+            prev_vel = (osu_last_obj.lazy_jump_dist + osu_last_last_obj.travel_dist)
+                / osu_last_obj.strain_time;
             curr_vel =
                 (osu_curr_obj.lazy_jump_dist + osu_last_obj.travel_dist) / osu_curr_obj.strain_time;
 
             // * Scale with ratio of difference compared to 0.5 * max dist.
-            let dist_ratio_base = (
-                (FRAC_PI_2 * (prev_vel - curr_vel).abs()) /
-                prev_vel.max(curr_vel)
-            ).sin();
+            let dist_ratio_base =
+                ((FRAC_PI_2 * (prev_vel - curr_vel).abs()) / prev_vel.max(curr_vel)).sin();
             let dist_ratio = dist_ratio_base.powf(2.0);
 
             // * Reward for % distance up to 125 / strainTime for overlaps where velocity is still changing.
-            let overlap_vel_buff = (
-                (f64::from(DIAMETER) * 1.25) /
-                osu_curr_obj.strain_time.min(osu_last_obj.strain_time)
-            ).min((prev_vel - curr_vel).abs());
+            let overlap_vel_buff = ((f64::from(DIAMETER) * 1.25)
+                / osu_curr_obj.strain_time.min(osu_last_obj.strain_time))
+            .min((prev_vel - curr_vel).abs());
 
             vel_change_bonus = overlap_vel_buff * dist_ratio;
 
             // * Penalize for rhythm changes.
-            let bonus_base =
-                osu_curr_obj.strain_time.min(osu_last_obj.strain_time) /
-                osu_curr_obj.strain_time.max(osu_last_obj.strain_time);
+            let bonus_base = osu_curr_obj.strain_time.min(osu_last_obj.strain_time)
+                / osu_curr_obj.strain_time.max(osu_last_obj.strain_time);
             vel_change_bonus *= bonus_base.powf(2.0);
         }
 
@@ -300,8 +288,8 @@ impl RelaxAimEvaluator {
 
         // * Add in acute angle bonus or wide angle bonus + velocity change bonus, whichever is larger.
         aim_strain += (acute_angle_bonus * Self::ACUTE_ANGLE_MULTIPLIER).max(
-            wide_angle_bonus * Self::WIDE_ANGLE_MULTIPLIER +
-                vel_change_bonus * Self::VELOCITY_CHANGE_MULTIPLIER
+            wide_angle_bonus * Self::WIDE_ANGLE_MULTIPLIER
+                + vel_change_bonus * Self::VELOCITY_CHANGE_MULTIPLIER,
         );
 
         // * Add in additional slider velocity bonus.
@@ -338,7 +326,7 @@ impl RelaxRhythmEvaluator {
     fn evaluate_diff_of<'a>(
         curr: &'a OsuDifficultyObject<'a>,
         diff_objects: &'a [OsuDifficultyObject<'a>],
-        hit_window: f64
+        hit_window: f64,
     ) -> f64 {
         if curr.base.is_spinner() {
             return 0.0;
@@ -364,22 +352,20 @@ impl RelaxRhythmEvaluator {
 
         let mut rhythm_start = 0;
 
-        while
-            curr
-                .previous(rhythm_start, diff_objects)
-                .filter(|prev| {
-                    rhythm_start + 2 < historical_note_count &&
-                        curr.start_time - prev.start_time < f64::from(Self::HISTORY_TIME_MAX)
-                })
-                .is_some()
+        while curr
+            .previous(rhythm_start, diff_objects)
+            .filter(|prev| {
+                rhythm_start + 2 < historical_note_count
+                    && curr.start_time - prev.start_time < f64::from(Self::HISTORY_TIME_MAX)
+            })
+            .is_some()
         {
             rhythm_start += 1;
         }
 
-        if
-            let Some((mut prev_obj, mut last_obj)) = curr
-                .previous(rhythm_start, diff_objects)
-                .zip(curr.previous(rhythm_start + 1, diff_objects))
+        if let Some((mut prev_obj, mut last_obj)) = curr
+            .previous(rhythm_start, diff_objects)
+            .zip(curr.previous(rhythm_start + 1, diff_objects))
         {
             // * we go from the furthest object back to the current one
             for i in (1..=rhythm_start).rev() {
@@ -388,9 +374,9 @@ impl RelaxRhythmEvaluator {
                 };
 
                 // * scales note 0 to 1 from history to now
-                let time_decay =
-                    (f64::from(Self::HISTORY_TIME_MAX) - (curr.start_time - curr_obj.start_time)) /
-                    f64::from(Self::HISTORY_TIME_MAX);
+                let time_decay = (f64::from(Self::HISTORY_TIME_MAX)
+                    - (curr.start_time - curr_obj.start_time))
+                    / f64::from(Self::HISTORY_TIME_MAX);
                 let note_decay =
                     ((historical_note_count - i) as f64) / (historical_note_count as f64);
 
@@ -405,19 +391,18 @@ impl RelaxRhythmEvaluator {
                 // * this function is meant to reduce rhythm bonus for deltas that are multiples of each other (i.e 100 and 200)
                 let delta_difference_ratio =
                     prev_delta.min(curr_delta) / prev_delta.max(curr_delta);
-                let curr_ratio =
-                    1.0 +
-                    Self::RHYTHM_RATIO_MULTIPLIER *
-                        (PI / delta_difference_ratio).sin().powf(2.0).min(0.5);
+                let curr_ratio = 1.0
+                    + Self::RHYTHM_RATIO_MULTIPLIER
+                        * (PI / delta_difference_ratio).sin().powf(2.0).min(0.5);
 
                 // reduce ratio bonus if delta difference is too big
                 let fraction = (prev_delta / curr_delta).max(curr_delta / prev_delta);
                 let fraction_multiplier = (2.0 - fraction / 8.0).clamp(0.0, 1.0);
 
-                let window_penalty = (
-                    ((prev_delta - curr_delta).abs() - delta_difference_eps).max(0.0) /
-                    delta_difference_eps
-                ).min(1.0);
+                let window_penalty = (((prev_delta - curr_delta).abs() - delta_difference_eps)
+                    .max(0.0)
+                    / delta_difference_eps)
+                    .min(1.0);
 
                 let mut effective_ratio = window_penalty * curr_ratio * fraction_multiplier;
 
@@ -445,9 +430,8 @@ impl RelaxRhythmEvaluator {
                         }
 
                         // * previous increase happened a note ago, 1/1->1/2-1/4, dont want to buff this.
-                        if
-                            last_delta > prev_delta + delta_difference_eps &&
-                            prev_delta > curr_delta + delta_difference_eps
+                        if last_delta > prev_delta + delta_difference_eps
+                            && prev_delta > curr_delta + delta_difference_eps
                         {
                             effective_ratio *= 0.125;
                         }
@@ -458,11 +442,10 @@ impl RelaxRhythmEvaluator {
                             effective_ratio *= 0.5;
                         }
 
-                        if
-                            let Some(island_count) = island_counts
-                                .iter_mut()
-                                .find(|entry| entry.island == island)
-                                .filter(|entry| !entry.island.is_default())
+                        if let Some(island_count) = island_counts
+                            .iter_mut()
+                            .find(|entry| entry.island == island)
+                            .filter(|entry| !entry.island.is_default())
                         {
                             // * only add island to island counts if they're going one after another
                             if prev_island == island {
@@ -471,9 +454,8 @@ impl RelaxRhythmEvaluator {
 
                             // * repeated island (ex: triplet -> triplet)
                             let power = logistic(f64::from(island.delta), 58.33, 0.24, Some(2.75));
-                            effective_ratio *= (3.0 / (island_count.count as f64)).min(
-                                (island_count.count as f64).recip().powf(power)
-                            );
+                            effective_ratio *= (3.0 / (island_count.count as f64))
+                                .min((island_count.count as f64).recip().powf(power));
                         } else {
                             island_counts.push(IslandCount { island, count: 1 });
                         }
@@ -495,10 +477,8 @@ impl RelaxRhythmEvaluator {
                             first_delta_switch = false;
                         }
 
-                        island = RhythmIsland::new_with_delta(
-                            curr_delta as i32,
-                            delta_difference_eps
-                        );
+                        island =
+                            RhythmIsland::new_with_delta(curr_delta as i32, delta_difference_eps);
                     }
                 } else if prev_delta > curr_delta + delta_difference_eps {
                     // * we're speeding up.
@@ -542,10 +522,8 @@ const MIN_DELTA_TIME: i32 = 25;
 
 // Compile-time check in case `OsuDifficultyObject::MIN_DELTA_TIME` changes
 // but we forget to update this value.
-const _: [
-    ();
-    0 - (!({ MIN_DELTA_TIME - (OsuDifficultyObject::MIN_DELTA_TIME as i32) == 0 }) as usize)
-] = [];
+const _: [(); 0
+    - (!({ MIN_DELTA_TIME - (OsuDifficultyObject::MIN_DELTA_TIME as i32) == 0 }) as usize)] = [];
 
 impl RhythmIsland {
     const fn new(delta_difference_eps: f64) -> Self {
@@ -579,16 +557,16 @@ impl RhythmIsland {
     }
 
     fn is_default(&self) -> bool {
-        self.delta_difference_eps.abs() < f64::EPSILON &&
-            self.delta == i32::MAX &&
-            self.delta_count == 0
+        self.delta_difference_eps.abs() < f64::EPSILON
+            && self.delta == i32::MAX
+            && self.delta_count == 0
     }
 }
 
 impl PartialEq for RhythmIsland {
     fn eq(&self, other: &Self) -> bool {
-        f64::from((self.delta - other.delta).abs()) < self.delta_difference_eps &&
-            self.delta_count == other.delta_count
+        f64::from((self.delta - other.delta).abs()) < self.delta_difference_eps
+            && self.delta_count == other.delta_count
     }
 }
 

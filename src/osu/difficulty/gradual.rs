@@ -89,6 +89,7 @@ impl OsuGradualDifficulty {
             time_preempt,
             map.hit_objects.len(),
             &mut attrs,
+            mods,
         );
 
         attrs.n_circles = 0;

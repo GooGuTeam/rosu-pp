@@ -1,6 +1,11 @@
 use rosu_map::section::hit_objects::CurveBuffers;
+use rosu_map::util::Pos;
 
-use crate::model::{beatmap::Beatmap, mods::Reflection};
+use crate::model::mods::rosu_mods::GameMod;
+use crate::{
+    model::{beatmap::Beatmap, mods::Reflection},
+    GameMods,
+};
 
 use super::{
     attributes::OsuDifficultyAttributes,
@@ -15,6 +20,7 @@ pub fn convert_objects(
     time_preempt: f64,
     mut take: usize,
     attrs: &mut OsuDifficultyAttributes,
+    mods: &GameMods,
 ) -> Box<[OsuObject]> {
     let mut curve_bufs = CurveBuffers::default();
     // mean=5.16 | median=4
@@ -43,6 +49,20 @@ pub fn convert_objects(
             }
         })
         .collect();
+
+    // Apply MagnetisedOsu mod effect by adjusting object positions
+    if let GameMods::Lazer(ref lazer_mods) = mods {
+        let attraction_strength = lazer_mods.iter().find_map(|gamemod| match gamemod {
+            GameMod::MagnetisedOsu(mg) => Some(mg.attraction_strength),
+            _ => None,
+        });
+
+        if let Some(strength) = attraction_strength {
+            // Make sure strength is within valid range [0.0, 1.0]
+            let strength = strength.unwrap().max(0.0).min(1.0);
+            adjust_object_positions(&mut osu_objects, strength);
+        }
+    }
 
     match reflection {
         Reflection::None => osu_objects.iter_mut().for_each(OsuObject::finalize_nested),
@@ -77,6 +97,35 @@ pub fn convert_objects(
 }
 
 const STACK_DISTANCE: f32 = 3.0;
+
+fn adjust_object_positions(objects: &mut [OsuObject], strength: f64) {
+    if objects.len() <= 2 {
+        return; // Need at least 3 objects to adjust middle ones
+    }
+
+    // Create a copy of original positions for reference
+    let original_positions: Vec<Pos> = objects.iter().map(|obj| obj.pos).collect();
+
+    // Adjust positions of all middle objects (not first or last)
+    for i in 1..objects.len() - 1 {
+        // Get the previous, current, and next positions
+        let prev_pos = original_positions[i - 1];
+        let curr_pos = original_positions[i];
+        let next_pos = original_positions[i + 1];
+
+        // Calculate the center point between previous and next objects
+        let center_pos = Pos::new(
+            (prev_pos.x + next_pos.x) / 2.0,
+            (prev_pos.y + next_pos.y) / 2.0,
+        );
+
+        // Move the object towards the center by the attraction strength
+        let new_x = curr_pos.x + (center_pos.x - curr_pos.x) * strength as f32;
+        let new_y = curr_pos.y + (center_pos.y - curr_pos.y) * strength as f32;
+
+        objects[i].pos = Pos::new(new_x, new_y);
+    }
+}
 
 fn stacking(hit_objects: &mut [OsuObject], stack_threshold: f64) {
     let mut extended_start_idx = 0;

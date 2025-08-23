@@ -79,10 +79,9 @@ impl OsuPerformanceCalculator<'_> {
         let mut acc_value = self.compute_accuracy_value();
         let flashlight_value = self.compute_flashlight_value();
 
-        if self.mods.rx()
-        {
-            aim_value*=1.715;
-            acc_value*=1.52;
+        if self.mods.rx() {
+            aim_value *= 1.715;
+            acc_value *= 1.52;
         }
 
         let pp = (aim_value.powf(1.1)
@@ -165,11 +164,11 @@ impl OsuPerformanceCalculator<'_> {
                 self.effective_miss_count,
                 self.attrs.aim_difficult_strain_count,
                 total_hits,
-                self.mods
+                self.mods,
             );
         }
 
-       // R* Low AR Override from Akatsuki
+        // R* Low AR Override from Akatsuki
         let lowar_factor_basis = if self.mods.rx() { 0.025 } else { 0.05 };
 
         let ar_factor = if self.attrs.ar > 10.33 {
@@ -228,7 +227,7 @@ impl OsuPerformanceCalculator<'_> {
         };
         // * It is important to consider accuracy difficulty when scaling with accuracy.
         aim_value *= 0.98 + f64::powf(f64::max(0.0, self.attrs.od()), 2.0) / 2500.0;
- // R* Bonus bonus normal clock rate scores
+        // R* Bonus bonus normal clock rate scores
         if self.mods.rx() && self.mods.clock_rate() <= 1.0 {
             aim_value *= 1.20
         }
@@ -256,7 +255,7 @@ impl OsuPerformanceCalculator<'_> {
                 self.effective_miss_count,
                 self.attrs.speed_difficult_strain_count,
                 total_hits,
-                self.mods
+                self.mods,
             );
         }
 
@@ -311,7 +310,6 @@ impl OsuPerformanceCalculator<'_> {
     }
 
     fn compute_accuracy_value(&self) -> f64 {
-
         // * This percentage only considers HitCircles of any value - in this part
         // * of the calculation we focus on hitting the timing hit window.
         let mut amount_hit_objects_with_acc = self.attrs.n_circles;
