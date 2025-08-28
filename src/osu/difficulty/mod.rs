@@ -1,7 +1,6 @@
 use std::{cmp, pin::Pin};
 
 use rosu_map::section::general::GameMode;
-use rosu_mods::GameMod;
 use skills::{aim::Aim, flashlight::Flashlight, speed::Speed, strain::OsuStrainSkill};
 
 use crate::{
